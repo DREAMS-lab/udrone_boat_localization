@@ -117,7 +117,7 @@ class Localization:
                                                       np.array([trans + rot]),
                                                       axis=0)
 
-            print("Updated pos x  : ", self.kf.x[0][0])
+                print("Updated pos x  : ", self.kf.x[0][0])
 
             if self.plot:
                 self.count += 1
@@ -132,17 +132,25 @@ class Localization:
 
             rate.sleep()
 
-    def plot_fusion(self):
-        # xs = np.array(xs)
-        if self.save_observation_time.shape[0] > 0:
-            plt.scatter(self.save_observation_time, self.save_observation[:, 0], marker='o', c="green",
-                        label='Position Sensor (x-axis)')
-        plt.plot(self.save_time, self.save_estimate[:, 0], ls='-', label='State Estimate (x-axis)')
-        plt.plot(self.save_time, self.save_ground_truth[:, 0], ls='-.', label='Ground Truth Estimate')
-        plt.title("Position sensor (x-axis) v/s State estimate v/s ground truth")
-        plt.xlabel("Time")
-        plt.ylabel("Position")
-        plt.show()
+    def plot_fusion(self, dim=2, axis=0):
+        if dim == 2:
+            # 2D plots
+            ax = plt.subplot(111)
+            if self.save_observation_time.shape[0] > 0:
+                ax.scatter(self.save_observation_time, self.save_observation[:, axis], marker='o', c="green",
+                           label='Sensor Observation')
+
+            # 0 is x-axis, 1 is x-axis vel
+            # 2 is y-axis, 3 is y-axis vel
+            # 4 is z-axis, 5 is z-axis vel
+            ax.plot(self.save_time, self.save_estimate[:, axis*2], ls='-', label='State Estimate')
+            ax.plot(self.save_time, self.save_ground_truth[:, axis], ls='-.', label='Ground Truth')
+            plt.title("Sensor observation v/s State estimate v/s Ground truth")
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Position")
+            ax.legend()
+            plt.legend()
+            plt.show()
 
 
 if __name__ == "__main__":

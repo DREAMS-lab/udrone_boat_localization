@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-State space equations over x-axis with boat speed taken into consideration
+State space equations over x-axis without boat speed taken into consideration
 
 """
 import rospy
@@ -10,7 +10,7 @@ import numpy as np
 from numpy.random import randn
 import matplotlib.pyplot as plt
 from geometry_msgs.msg import PoseStamped
-
+from mpl_toolkits import mplot3d
 # create logs
 import os
 
@@ -30,22 +30,44 @@ class Localization:
         self.listener = tf.TransformListener()
 
         # Kalman filter definition
-        self.kf = KalmanFilter(dim_x=3, dim_z=1)
+        self.kf = KalmanFilter(dim_x=6, dim_z=3)
         self.dt = 0.01
+
         self.kf.x = np.array([[0.5],
                               [0.5],
+                              [0.5],
+                              [0.5],
+                              [5],
                               [0.5]])
 
-        self.kf.P = np.array([[2, 0, 0],
-                              [0, 1, 0],
-                              [0, 0, 1]])
+        self.kf.P = np.array([[2, 0, 0, 0, 0, 0],
+                              [0, 2, 0, 0, 0, 0],
+                              [0, 0, 2, 0, 0, 0],
+                              [0, 0, 0, 2, 0, 0],
+                              [0, 0, 0, 0, 2, 0],
+                              [0, 0, 0, 0, 0, 2]])
 
-        self.kf.H = np.array([[1., 0, 0]])
-        self.kf.R = np.eye(1) * 1.5
-        self.kf.Q = np.eye(3) * 0.002
-        self.kf.F = np.array([[1., self.dt, -self.dt],
-                              [0.,       1.,      0.],
-                              [0,        0,       1.]])
+        self.kf.H = np.array([[1., 0, 0, 0, 0, 0],
+                              [0, 0, 1, 0, 0, 0],
+                              [0, 0, 0, 0, 1, 0]])
+
+        self.kf.R = np.array([[2, 0, 0],
+                              [0, 2, 0],
+                              [0, 0, 2]])
+
+        self.kf.Q = np.array([[0.002, 0, 0, 0, 0, 0],
+                              [0, 0.02, 0, 0, 0, 0],
+                              [0, 0, 0.002, 0, 0, 0],
+                              [0, 0, 0, 0.02, 0, 0],
+                              [0, 0, 0, 0, 0.002, 0],
+                              [0, 0, 0, 0, 0, 0.02]])
+
+        self.kf.F = np.array([[1., self.dt, 0, 0, 0, 0],
+                              [0,  1., 0, 0, 0, 0],
+                              [0, 0, 1., self.dt, 0, 0],
+                              [0, 0, 0, 1., 0, 0],
+                              [0, 0, 0, 0, 1., self.dt],
+                              [0, 0, 0, 0, 0, 1.]])
 
         # Variables to maintain kalman update only on new aruco observation
         self.aruco_previous_timestamp = rospy.Time.now()
@@ -54,18 +76,18 @@ class Localization:
 
         # Plots to stop_count iterations
         self.plot = True
-        self.stop_count = 100  # 5000, means 50 sec if dt is 0.01
+        self.stop_count = 6000  # 6000, means 60 sec if dt is 0.01
         self.count = 0
         if self.plot:
             self.save_time = np.empty((0, 1))  # n x timestamps
             self.save_observation = np.empty((0, 7))  # n x 7, where 7 values are x, y, z and quaternion
             self.save_ground_truth = np.empty((0, 7))  # n x 7, where 7 values are x, y, z and quaternion
-            self.save_estimate = np.empty((0, 3))  # n x 3, where 2 values are the state estimates x and xdot
+            self.save_estimate = np.empty((0, 6))  # n x 2, where 2 values are the state estimates x and xdot
             self.save_observation_time = np.empty((0, 1))  # n x timestamps
 
         self.run_filter()
-        self.save_data_to_file()
-        self.plot_fusion()
+        # self.save_data_to_file()
+        self.plot_fusion(dim=3, axis=0)
 
     def save_data_to_file(self):
         np.save('logs/kf_with_boat_ground_truth.npy', self.save_ground_truth)
@@ -105,11 +127,11 @@ class Localization:
                 continue
 
             self.kf.predict()
-            print("Predicted pos x: ", self.kf.x[0][0])
+            print("Predict     :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
 
             # Do kalman update call only when the camera detects an aruco marker
             if self.is_observation:
-                self.kf.update(np.array([trans[0]]))
+                self.kf.update(np.array([trans]))
                 self.is_observation = False
                 if self.plot:
                     self.save_observation_time = np.append(self.save_observation_time,
@@ -119,7 +141,7 @@ class Localization:
                                                       np.array([trans + rot]),
                                                       axis=0)
 
-                print("Updated pos x  : ", self.kf.x[0][0])
+                print("Update      :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
 
             if self.plot:
                 self.count += 1
@@ -154,8 +176,38 @@ class Localization:
             plt.legend()
             plt.show()
 
+        elif dim == 3:
+            # 3D plots
+            # x-axis is the time
+            # y-axis and z-axis will show positions
+
+            fig = plt.figure()
+            ax = plt.axes(projection='3d')
+
+            # Plot estimates
+            x = self.save_time
+            y = self.save_estimate[:, axis]
+            z = self.save_estimate[:, axis+2]  # x, x_dot, y, y_dot, z, z_dot
+            ax.plot3D(x, y, z, 'blue')
+
+            # Plot ground truth
+            x = self.save_time
+            y = self.save_ground_truth[:, axis]
+            z = self.save_ground_truth[:, axis+1]  # x, y, z
+            ax.plot3D(x, y, z, 'orange')
+
+            # Plot observations
+            x = self.save_observation_time
+            y = self.save_observation[:, axis]
+            z = self.save_observation[:, axis+1]  # x, y, z
+            ax.scatter(x, y, z, color='r')
+
+            ax.set_xlabel('Time')
+            ax.set_ylabel('X-axis position')
+            ax.set_zlabel('Y-axis position')
+            ax.set_title('Sensor observation v/s State estimate v/s Ground truth')
+            plt.show()
+
 
 if __name__ == "__main__":
     Localization()
-
-
