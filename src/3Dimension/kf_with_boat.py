@@ -37,7 +37,7 @@ class Localization:
         self.listener = tf.TransformListener()
 
         # Kalman filter definition
-        self.kf = KalmanFilter(dim_x=6, dim_z=3)
+        self.kf = KalmanFilter(dim_x=8, dim_z=3)
         self.dt = 0.01
 
         self.kf.x = np.array([[0.5],
@@ -45,36 +45,44 @@ class Localization:
                               [0.5],
                               [0.5],
                               [5],
-                              [0.5]])
+                              [0.5],
+                              [0.1],
+                              [0.1]])
 
-        self.kf.P = np.array([[2, 0, 0, 0, 0, 0],
-                              [0, 2, 0, 0, 0, 0],
-                              [0, 0, 2, 0, 0, 0],
-                              [0, 0, 0, 2, 0, 0],
-                              [0, 0, 0, 0, 2, 0],
-                              [0, 0, 0, 0, 0, 2]])
+        self.kf.P = np.array([[2, 0, 0, 0, 0, 0, 0, 0],
+                              [0, 2, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 2, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 2, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 2, 0, 0, 0],
+                              [0, 0, 0, 0, 0, 2, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 2, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 2]])
 
-        self.kf.H = np.array([[1., 0, 0, 0, 0, 0],
-                              [0, 0, 1, 0, 0, 0],
-                              [0, 0, 0, 0, 1, 0]])
+        self.kf.H = np.array([[1., 0, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 1, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 1, 0, 0, 0]])
 
         self.kf.R = np.array([[2, 0, 0],
                               [0, 2, 0],
                               [0, 0, 2]])
 
-        self.kf.Q = np.array([[0.002, 0, 0, 0, 0, 0],
-                              [0, 0.02, 0, 0, 0, 0],
-                              [0, 0, 0.002, 0, 0, 0],
-                              [0, 0, 0, 0.02, 0, 0],
-                              [0, 0, 0, 0, 0.002, 0],
-                              [0, 0, 0, 0, 0, 0.02]])
+        self.kf.Q = np.array([[0.002, 0, 0, 0, 0, 0, 0, 0],
+                              [0, 0.02, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 0.002, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 0.02, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 0.002, 0, 0, 0],
+                              [0, 0, 0, 0, 0, 0.02, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 0.02, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 0.02]])
 
-        self.kf.F = np.array([[1., self.dt, 0, 0, 0, 0],
-                              [0,  1., 0, 0, 0, 0],
-                              [0, 0, 1., self.dt, 0, 0],
-                              [0, 0, 0, 1., 0, 0],
-                              [0, 0, 0, 0, 1., self.dt],
-                              [0, 0, 0, 0, 0, 1.]])
+        self.kf.F = np.array([[1., self.dt, 0, 0, 0, 0, -self.dt, 0],
+                              [0,  1., 0, 0, 0, 0, 0, 0],
+                              [0, 0, 1., self.dt, 0, 0, 0, -self.dt],
+                              [0, 0, 0, 1., 0, 0, 0, 0],
+                              [0, 0, 0, 0, 1., self.dt, 0, 0],
+                              [0, 0, 0, 0, 0, 1, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 1, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 1]])
 
         # Variables to maintain kalman update only on new aruco observation
         self.aruco_previous_timestamp = rospy.Time.now()
@@ -86,11 +94,14 @@ class Localization:
         self.stop_count = 12000  # 6000, means 60 sec if dt is 0.01
         self.on_vehicle = True
         self.count = 0
+        self.t1 = None
+        self.again = True
+
         if self.plot:
             self.save_time = np.empty((0, 1))  # n x timestamps
             self.save_observation = np.empty((0, 7))  # n x 7, where 7 values are x, y, z and quaternion
             self.save_ground_truth = np.empty((0, 7))  # n x 7, where 7 values are x, y, z and quaternion
-            self.save_estimate = np.empty((0, 6))  # n x 2, where 2 values are the state estimates x and xdot
+            self.save_estimate = np.empty((0, 8))  # n x 2, where 2 values are the state estimates x and xdot
             self.save_observation_time = np.empty((0, 1))  # n x timestamps
 
         self.run()
@@ -99,9 +110,8 @@ class Localization:
         # self.plot_fusion(dim=3, axis=0)
 
     def run(self):
-        t1 = threading.Thread(target=self.plot_fusion)
+        self.t1 = threading.Thread(target=self.animate)
         t2 = threading.Thread(target=self.run_filter)
-        t1.start()
         t2.start()
 
     def save_data_to_file(self):
@@ -128,13 +138,13 @@ class Localization:
                     self.is_observation = True
                     (trans, rot) = self.listener.lookupTransform('/udrone', '/world', self.aruco_pose_timestamp)
                     self.aruco_previous_timestamp = self.aruco_pose_timestamp
-                    print("Aruco Observation: ", trans)
+                    # print("Aruco Observation: ", trans)
 
                 if self.plot:
                     (gtrans, grot) = self.listener.lookupTransform('/ground_truth_udrone',
                                                                    '/ground_truth_heron',
                                                                    rospy.Time(0))
-                    print("Ground Truth: ", gtrans)
+                    # print("Ground Truth: ", gtrans)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as Ex:
                 print(Ex)
@@ -142,7 +152,7 @@ class Localization:
                 continue
 
             self.kf.predict()
-            print("Predict     :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
+            # print("Predict     :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
 
             # Do kalman update call only when the camera detects an aruco marker
             if self.is_observation:
@@ -156,7 +166,7 @@ class Localization:
                                                       np.array([trans + rot]),
                                                       axis=0)
 
-                print("Update      :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
+                # print("Update      :", self.kf.x.T.flatten()[0], self.kf.x.T.flatten()[2], self.kf.x.T.flatten()[4])
 
             if self.plot:
                 self.count += 1
@@ -166,7 +176,9 @@ class Localization:
                                                    np.array([gtrans + grot]),
                                                    axis=0)
                 print(self.count)
-
+                # if self.count > 100 and self.again:
+                #     self.t1.start()
+                #     self.again = False
                 # if you are running this filter on vehicle, disable plot and stop count
                 if self.count > self.stop_count and not self.on_vehicle:
                     break
@@ -238,41 +250,52 @@ class Localization:
             plt.show()
 
     def animate(self):
-        x = np.random.normal(size=(100, 3))
-
+        # First set up the figure, the axis, and the plot element we want to animate
         fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        gs = ax.scatter([], [], [], c='red')
-        es = ax.scatter([], [], [], c='blue')
+        ax = plt.axes()
+        ax.set_xlim(0, 10000)
+        ax.set_ylim(-10, 10)
+        line, = ax.plot([], [], lw=2)
 
+        # initialization function: plot the background of each frame
+        def init():
+            line.set_data([], [])
+            return line,
+
+        # animation function.  This is called sequentially
         def update(i):
-            # print(self.save_time)
-            length = self.save_time.shape[0] - 100
-            # print(length)
-            if length > 5:
-                time = self.save_time[length:length+101].flatten()
-                ground_truth = self.save_ground_truth[length:length+101, :2]
-                ax.set_xlim3d([time[0], time[len(time)-1]])
-                gs._offsets3d = (time[:i],
-                                 ground_truth[:i, 0].flatten(),
-                                 ground_truth[:i, 1].flatten())
+            length = self.save_time.shape[0] - 102
+            y = self.save_ground_truth[:length+i, 0].flatten()
+            time = self.save_time.flatten()
+            ax.set_xlim(0, time.shape[0])
+            line.set_data(time[:length+i], y)
+            return line,
 
-                estimate = self.save_estimate[length:length+101, :2]
-                es._offsets3d = (time[:i],
-                                 estimate[:i, 0].flatten(),
-                                 estimate[:i, 1].flatten())
+        # call the animator.  blit=True means only re-draw the parts that have changed.
+        anim = animation.FuncAnimation(fig, update, init_func=init,
+                                       frames=100, interval=10, blit=True)
 
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.set_xlim(-100, 100)
-        ax.set_ylim(-5, 5)
-        ax.set_zlim(-5, 5)
-
-        ani = matplotlib.animation.FuncAnimation(fig, update, frames=100, interval=10)
-
-        plt.tight_layout()
         plt.show()
+
+        # fig, ax = plt.subplots()
+        # xdata, ydata = [], []
+        # ln, = ax.plot([], [], 'r', animated=True)
+        # ln.set_data(xdata, ydata)
+        #
+        # def update(i):
+        #     time = self.save_time.flatten()
+        #     ground_truth = self.save_ground_truth[0:, :2]
+        #
+        #     ax.set_xlim(0, time[len(time)-1])
+        #     ax.set_ylim(-10, 10)
+        #     ln.set_data(time, ground_truth[:i, 0].flatten())
+        #     return ln
+        #
+        # ax.set_xlabel('Time')
+        # ax.set_ylabel('Position')
+        # ani = matplotlib.animation.FuncAnimation(fig, update, frames=100, interval=10)
+        # plt.tight_layout()
+        # plt.show()
 
 
 if __name__ == "__main__":
